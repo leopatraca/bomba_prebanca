@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bancada Didática · Bomba IMBIL INI 25-150 + ESP32</title>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<style>
+  :root{--ink:#16202b;--mut:#5b6875;--bg:rgba(255,255,255,.86);--line:rgba(20,30,40,.12)}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#cfd5da;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
+  #renderCanvas{position:fixed;inset:0;width:100%;height:100%;outline:none;touch-action:none}
+  #leaders{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+  #labels{position:fixed;inset:0;pointer-events:none}
+  .lbl{position:absolute;left:0;top:0;display:flex;gap:8px;align-items:center;padding:6px 10px 6px 8px;background:var(--bg);
+       border:1px solid var(--line);border-left:4px solid var(--c);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.14);
+       pointer-events:auto;cursor:pointer;white-space:nowrap;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:opacity .15s}
+  .lbl:hover{background:#fff}
+  .lbl .t{font-size:13px;font-weight:650;line-height:1.15}
+  .lbl .s{font-size:11px;color:var(--mut);line-height:1.2}
+  .lbl.eq .t{font-size:12px;font-weight:600}
+  .lbl.sensor .ic{width:22px;height:22px;border-radius:6px;background:var(--c);color:#fff;font:700 11px/22px system-ui;text-align:center}
+  .panel{position:fixed;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.16);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  #title{top:14px;left:14px;padding:10px 14px;max-width:min(460px,calc(100vw - 28px))}
+  #title h1{font-size:15px;margin:0 0 2px}
+  #title p{font-size:12px;margin:0;color:var(--mut)}
+  #telemetry{left:14px;bottom:14px;width:290px;padding:10px 12px}
+  #telemetry .hd{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:650;margin-bottom:6px}
+  #telemetry .hd small{color:var(--mut);font-weight:400}
+  .led{width:9px;height:9px;border-radius:50%;background:#9aa4ad}
+  .led.on{background:#12b886;box-shadow:0 0 8px #12b886}
+  .met{display:grid;grid-template-columns:1fr 92px;gap:0 8px;padding:6px 0;border-top:1px solid var(--line)}
+  .met .n{font-size:11px;color:var(--mut)}
+  .met .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+  .met .v small{font-size:11px;font-weight:500;color:var(--mut)}
+  .met canvas{grid-row:1/3;grid-column:2;width:92px;height:40px;align-self:center}
+  #toolbar{left:50%;transform:translateX(-50%);bottom:14px;display:flex;gap:6px;padding:6px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 330px)}
+  #toolbar button,#info button{font:600 12px system-ui;border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 12px;border-radius:8px;cursor:pointer}
+  #toolbar button:hover,#info button:hover{background:#eef2f5}
+  #toolbar button.on{background:#16202b;color:#fff}
+  #btnMotor.on{background:#c92a2a;border-color:#c92a2a}
+  #btnMotor{background:#2b8a3e;color:#fff;border-color:#2b8a3e}
+  #help{top:14px;right:14px;padding:8px 12px;font-size:11px;color:var(--mut)}
+  #info{top:64px;right:14px;width:340px;max-height:calc(100vh - 150px);overflow:auto;padding:14px 16px;font-size:13px;line-height:1.45}
+  #info.hidden{display:none}
+  #info h2{font-size:16px;margin:0 0 2px;padding-right:24px}
+  #info .tag{display:inline-block;font-size:11px;color:#fff;background:var(--c);border-radius:4px;padding:1px 6px;margin-bottom:8px}
+  #info table{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+  #info td{border-top:1px solid var(--line);padding:4px 4px}
+  #info td:first-child{color:var(--mut)}
+  #info .x{position:absolute;top:8px;right:8px;padding:2px 8px}
+  #info p{margin:6px 0}
+  #loading{position:fixed;inset:0;display:grid;place-items:center;background:#cfd5da;font-size:14px;color:var(--mut);z-index:10}
+  @media (max-width:760px){
+    #telemetry{width:auto;right:14px;bottom:66px;padding:6px 10px}
+    .met{grid-template-columns:1fr 80px}.met canvas{width:80px}
+    #toolbar{max-width:calc(100vw - 20px);bottom:8px}
+    #help{display:none}
+    #info{left:10px;right:10px;width:auto;top:auto;bottom:10px;max-height:55vh;z-index:5}
+    .lbl .s{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="renderCanvas"></canvas>
+<svg id="leaders"></svg>
+<div id="labels"></div>
+
+<div id="title" class="panel">
+  <h1>Bancada didática · Bomba centrífuga IMBIL INI 25-150</h1>
+  <p>Monitoramento com ESP32: temperatura do óleo (MAX6675 + termopar K), corrente (SCT-013) e vibração (MPU-6050). Clique nas etiquetas para detalhes.</p>
+</div>
+<div id="help" class="panel">Arrastar: girar · Roda/pinça: zoom · Botão direito/Ctrl+arrastar: mover</div>
+
+<section id="telemetry" class="panel">
+  <div class="hd"><span id="led" class="led"></span>ESP32 · telemetria <small>(dados simulados, tempo acelerado)</small></div>
+  <div class="met"><span class="n">Temperatura do óleo · MAX6675</span><span class="v"><span id="vT">26,00</span> <small>°C</small></span><canvas id="sT" width="184" height="80"></canvas></div>
+  <div class="met"><span class="n">Corrente fase L1 · SCT-013</span><span class="v"><span id="vI">0,00</span> <small>A rms</small></span><canvas id="sI" width="184" height="80"></canvas></div>
+  <div class="met"><span class="n">Vibração · MPU-6050</span><span class="v"><span id="vV">0,00</span> <small>mm/s rms · <span id="vA">0,000</span> g</small></span><canvas id="sV" width="184" height="80"></canvas></div>
+</section>
+
+<nav id="toolbar" class="panel">
+  <button id="btnMotor">▶ Ligar motor</button>
+  <button id="btnCut">Corte do mancal</button>
+  <button id="btnLabels">Rótulos: todos</button>
+  <button id="btnRot">Auto-giro</button>
+  <button id="btnView">Vista geral</button>
+</nav>
+
+<aside id="info" class="panel hidden"><button class="x" id="infoClose">✕</button><div id="infoBody"></div>
+  <div style="margin-top:10px"><button id="infoFocus">Focar câmera</button></div></aside>
+<div id="loading">Carregando cena 3D…</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Bancada didática – Bomba IMBIL INI 25-150 + instrumentação ESP32
+   Unidades: metros. Frente da bancada = -Z. Eixo da bomba/motor = +X.
+   ===================================================================== */
+const V3 = BABYLON.Vector3, C3 = BABYLON.Color3;
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
+const scene = new BABYLON.Scene(engine);
+scene.clearColor = new BABYLON.Color4(0.80, 0.83, 0.86, 1);
+scene.fogMode = BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity = 0.03; scene.fogColor = new C3(0.80, 0.83, 0.86);
+
+/* ---------- câmera ---------- */
+const HOME = { alpha: -Math.PI / 2 - 0.5, beta: 1.13, radius: 3.3, target: new V3(-0.02, 1.08, 0.05) };
+const camera = new BABYLON.ArcRotateCamera("cam", HOME.alpha, HOME.beta, HOME.radius, HOME.target.clone(), scene);
+camera.attachControl(canvas, true);
+Object.assign(camera, { lowerRadiusLimit: 0.14, upperRadiusLimit: 7.5, lowerBetaLimit: 0.12, upperBetaLimit: 1.53,
+  wheelDeltaPercentage: 0.012, pinchDeltaPercentage: 0.004, panningSensibility: 1400, minZ: 0.01, maxZ: 60, inertia: 0.86 });
+
+/* ---------- luzes e sombras ---------- */
+const hemi = new BABYLON.HemisphericLight("hemi", new V3(0.2, 1, -0.3), scene);
+hemi.intensity = 0.75; hemi.groundColor = new C3(0.38, 0.36, 0.33);
+const sun = new BABYLON.DirectionalLight("key", new V3(-0.42, -1, 0.5), scene);
+sun.position = new V3(2.4, 5.5, -2.8); sun.intensity = 2.4;
+const fill = new BABYLON.DirectionalLight("fill", new V3(0.6, -0.5, 0.4), scene); fill.intensity = 0.55;
+const shadowGen = new BABYLON.ShadowGenerator(2048, sun);
+shadowGen.usePercentageCloserFiltering = true;
+shadowGen.filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
+shadowGen.bias = 0.0006; shadowGen.normalBias = 0.012;
+sun.shadowMinZ = 0.5; sun.shadowMaxZ = 12;
+
+/* ---------- ambiente (reflexos PBR) ---------- */
+const metalMats = [];
+new BABYLON.CubeTexture("https://assets.babylonjs.com/environments/environmentSpecular.env", scene,
+  null, false, null,
+  function () { scene.environmentTexture = this; scene.environmentIntensity = 0.7; hemi.intensity = 0.45; },
+  function () { metalMats.forEach(m => m.metallic *= 0.45); },   // sem internet: metais menos escuros
+  undefined, true);
+
+/* ---------- materiais ---------- */
+function pbr(name, hex, metallic, roughness, o = {}) {
+  const m = new BABYLON.PBRMaterial(name, scene);
+  m.albedoColor = C3.FromHexString(hex).toLinearSpace();
+  m.metallic = metallic; m.roughness = roughness;
+  if (o.alpha !== undefined) { m.alpha = o.alpha; m.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_ALPHABLEND; m.backFaceCulling = false; m.metadata = { transparent: true }; }
+  if (o.clear) { m.clearCoat.isEnabled = true; m.clearCoat.intensity = o.clear; m.clearCoat.roughness = 0.12; }
+  if (o.emissive) m.emissiveColor = C3.FromHexString(o.emissive);
+  if (metallic > 0.5) metalMats.push(m);
+  return m;
+}
+const M = {
+  frame:   pbr("frame", "#aeb4b9", 0.25, 0.45, { clear: 0.3 }),
+  top:     pbr("top", "#5d6369", 0.75, 0.42),
+  base:    pbr("base", "#2a2e33", 0.3, 0.5, { clear: 0.4 }),
+  pump:    pbr("pump", "#1c4f94", 0.15, 0.36, { clear: 0.7 }),
+  motor:   pbr("motor", "#2d6b44", 0.15, 0.38, { clear: 0.6 }),
+  steel:   pbr("steel", "#b9bcbf", 1, 0.28),
+  stain:   pbr("stain", "#d3d6d9", 1, 0.2),
+  galv:    pbr("galv", "#a2a8ad", 0.9, 0.42),
+  alu:     pbr("alu", "#c8cbce", 1, 0.32),
+  brass:   pbr("brass", "#b98d4b", 1, 0.3),
+  red:     pbr("red", "#c3242b", 0.05, 0.35, { clear: 0.5 }),
+  green:   pbr("greenBtn", "#2b9a3e", 0.05, 0.35),
+  yellow:  pbr("yellow", "#e8b50f", 0.1, 0.4),
+  black:   pbr("black", "#141517", 0, 0.6),
+  rubber:  pbr("rubber", "#111111", 0, 0.85),
+  cableK:  pbr("cableK", "#18191b", 0, 0.45),
+  cableY:  pbr("cableY", "#e6bf19", 0, 0.42),
+  cableG:  pbr("cableG", "#7b8187", 0, 0.5),
+  cableBr: pbr("cableBr", "#6b3f22", 0, 0.5),
+  cableGY: pbr("cableGY", "#3d9a3a", 0, 0.5),
+  cableW:  pbr("cableW", "#9aa0a6", 0, 0.5),
+  encl:    pbr("encl", "#cdd1d4", 0.05, 0.5),
+  panel:   pbr("panelBox", "#c9cdd0", 0.3, 0.45, { clear: 0.3 }),
+  sct:     pbr("sct", "#1f3452", 0, 0.45),
+  pcbG:    pbr("pcbG", "#1f6b3a", 0, 0.45),
+  chip:    pbr("chip", "#1b1b1d", 0, 0.5),
+  beige:   pbr("beige", "#d9c7a0", 0, 0.5),
+  blueTerm:pbr("blueTerm", "#2667c9", 0, 0.45),
+  acrylic: pbr("acrylic", "#ffffff", 0, 0.03, { alpha: 0.16 }),
+  lid:     pbr("lid", "#f4f8ff", 0, 0.04, { alpha: 0.18 }),
+  water:   pbr("water", "#3a8cc4", 0, 0.06, { alpha: 0.38 }),
+  oil:     pbr("oil", "#c77a10", 0, 0.15, { alpha: 0.85 }),
+  glass:   pbr("glass", "#ffffff", 0, 0.02, { alpha: 0.12 }),
+  lampOn:  pbr("lampOn", "#39d353", 0, 0.3),
+  ledM:    pbr("led", "#12b886", 0, 0.3),
+};
+M.lampOn.emissiveColor = new C3(0.02, 0.12, 0.03);
+
+/* ---------- registro / fusão de malhas estáticas ---------- */
+const buckets = new Map();
+function reg(m, o = {}) {
+  m.metadata = Object.assign({}, m.metadata || {}, { label: o.label || null, noShadow: !!o.noShadow });
+  m.isPickable = !!o.label;
+  const tr = m.material && m.material.metadata && m.material.metadata.transparent;
+  if (o.parent) m.parent = o.parent;
+  if (o.static === false || o.parent || tr || !m.material) return m;
+  const key = m.material.uniqueId + "|" + (o.label || "") + "|" + (o.noShadow ? 1 : 0);
+  if (!buckets.has(key)) buckets.set(key, []);
+  buckets.get(key).push(m);
+  return m;
+}
+function finalizeMeshes() {
+  for (const [, list] of buckets) {
+    if (list.length < 2) continue;
+    const meta = list[0].metadata;
+    const mm = BABYLON.Mesh.MergeMeshes(list, true, true);
+    if (mm) { mm.metadata = meta; mm.isPickable = !!meta.label; }
+  }
+  scene.meshes.forEach(m => {
+    const tr = m.material && m.material.metadata && m.material.metadata.transparent;
+    if (!(m.metadata && m.metadata.noShadow) && !tr) shadowGen.addShadowCaster(m);
+    m.receiveShadows = true;
+  });
+}
+
+/* ---------- primitivas ---------- */
+function box(n, w, h, d, p, mat, o) { const m = BABYLON.MeshBuilder.CreateBox(n, { width: w, height: h, depth: d }, scene); m.position = p; m.material = mat; return reg(m, o); }
+function cyl(n, r, len, axis, p, mat, o = {}) {
+  const m = BABYLON.MeshBuilder.CreateCylinder(n, { height: len, diameterBottom: 2 * r, diameterTop: 2 * (o.rTop !== undefined ? o.rTop : r), tessellation: o.tess || 36 }, scene);
+  if (axis === "x") m.rotation.z = -Math.PI / 2;
+  if (axis === "z") m.rotation.x = Math.PI / 2;
+  m.position = p; m.material = mat; return reg(m, o);
+}
+function sph(n, r, p, mat, o = {}) { const m = BABYLON.MeshBuilder.CreateSphere(n, { diameter: 2 * r, segments: 20 }, scene); m.position = p; if (o.scale) m.scaling = o.scale; m.material = mat; return reg(m, o); }
+function tube(n, path, r, mat, o = {}) { const m = BABYLON.MeshBuilder.CreateTube(n, { path, radius: r, tessellation: o.tess || 16, cap: BABYLON.Mesh.CAP_ALL }, scene); m.material = mat; return reg(m, o); }
+function seg(n, a, b, r, mat, o) { return tube(n, [a, b], r, mat, o); }
+function hexNut(n, p, dir, r, len, mat, o = {}) { return tube(n, [p.subtract(dir.scale(len / 2)), p.add(dir.scale(len / 2))], r, mat, Object.assign({ tess: 6 }, o)); }
+function dedupe(a) { return a.filter((p, i) => i === 0 || V3.Distance(p, a[i - 1]) > 1e-5); }
+function spline(pts, n = 14) { return dedupe(BABYLON.Curve3.CreateCatmullRomSpline(pts, n, false).getPoints()); }
+function roundedPath(pts, R, s = 10) {
+  const out = [pts[0]], corners = [];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const p = pts[i], d1 = p.subtract(pts[i - 1]).normalize(), d2 = pts[i + 1].subtract(p).normalize();
+    const c = V3.Dot(d1, d2); if (c > 0.999) { out.push(p); continue; }
+    const t = R * Math.tan(Math.acos(Math.max(-1, Math.min(1, c))) / 2);
+    const A = p.subtract(d1.scale(t)), B = p.add(d2.scale(t));
+    const arc = BABYLON.Curve3.CreateQuadraticBezier(A, p, B, s).getPoints();
+    out.push(...arc); corners.push({ A, B, d1, d2, arc });
+  }
+  out.push(pts[pts.length - 1]); return { path: dedupe(out), corners };
+}
+function tex(name, w, h, draw, alpha = false) {
+  const t = new BABYLON.DynamicTexture(name, { width: w, height: h }, scene, true);
+  t.hasAlpha = alpha; const ctx = t.getContext(); draw(ctx, w, h); t.update(true); t.anisotropicFilteringLevel = 8; return t;
+}
+function texMat(name, t, rough = 0.5, metal = 0, o = {}) {
+  const m = new BABYLON.PBRMaterial(name, scene); m.albedoTexture = t; m.roughness = rough; m.metallic = metal;
+  if (o.alphaTest) { m.useAlphaFromAlbedoTexture = true; m.opacityTexture = t; m.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_ALPHATEST; m.alphaCutOff = 0.5; m.backFaceCulling = false; }
+  if (o.emissive) { m.emissiveTexture = t; m.emissiveColor = new C3(o.emissive, o.emissive, o.emissive); }
+  return m;
+}
+/* plano texturizado; faceDir: '-z' (padrão), '+z', '+x', '-x', '+y' */
+function texPlane(n, w, h, mat, p, faceDir = "-z", o = {}) {
+  const m = BABYLON.MeshBuilder.CreatePlane(n, { width: w, height: h }, scene);
+  const r = { "-z": [0, 0, 0], "+z": [0, Math.PI, 0], "+x": [0, -Math.PI / 2, 0], "-x": [0, Math.PI / 2, 0], "+y": [Math.PI / 2, 0, 0] }[faceDir];
+  m.rotation = new V3(r[0], r[1], r[2]); m.position = p; m.material = mat;
+  return reg(m, Object.assign({ static: false }, o));
+}
+
+/* ---------- constantes de projeto ---------- */
+const TOP = 0.80;        // tampo da bancada
+const BTOP = 0.88;       // topo da base metálica
+const AX = 1.05;         // altura do eixo bomba/motor
+const XC = -0.12;        // centro da carcaça (voluta)
+const PZ = 0.437;        // face frontal do painel traseiro
+const NOZ = new V3(XC, 1.25, 0.05);   // topo do bocal de recalque
+
+/* ============ AMBIENTE: piso, paredes ============ */
+(function buildRoom() {
+  const floorT = tex("floorT", 1024, 1024, (c, w, h) => {
+    c.fillStyle = "#8f9894"; c.fillRect(0, 0, w, h);
+    const id = c.getImageData(0, 0, w, h), d = id.data;
+    for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+    c.putImageData(id, 0, 0);
+    for (let i = 0; i < 900; i++) { c.fillStyle = `rgba(${Math.random() < .5 ? "255,255,255" : "40,40,40"},.10)`; c.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+    c.strokeStyle = "rgba(40,45,45,.35)"; c.lineWidth = 3; c.strokeRect(0, 0, w, h);
+  });
+  floorT.uScale = floorT.vScale = 7;
+  const floor = BABYLON.MeshBuilder.CreateGround("floor", { width: 14, height: 14 }, scene);
+  floor.material = texMat("floorM", floorT, 0.42); floor.metadata = { noShadow: true };
+
+  // faixas de demarcação amarela
+  const yl = pbr("floorLine", "#e2b40c", 0, 0.5);
+  [[0, -1.15, 3.0, 0.06], [0, 1.25, 3.0, 0.06]].forEach(([x, z, w, d]) => reg(BABYLON.MeshBuilder.CreateGround("ln", { width: w, height: d }, scene), { noShadow: true }).material = yl);
+  scene.meshes.slice(-2).forEach((m, i) => { m.position = new V3(0, 0.002, i ? 1.25 : -1.15); });
+  [-1.5, 1.5].forEach(x => { const m = reg(BABYLON.MeshBuilder.CreateGround("ln", { width: 0.06, height: 2.46 }, scene), { noShadow: true }); m.material = yl; m.position = new V3(x, 0.002, 0.05); });
+
+  const wallT = tex("wallT", 1024, 1024, (c, w, h) => {
+    c.fillStyle = "#e6e4de"; c.fillRect(0, 0, w, h);
+    c.fillStyle = "#8ea39b"; c.fillRect(0, h * 0.63, w, h * 0.37);
+    c.fillStyle = "#5c6b66"; c.fillRect(0, h * 0.63 - 6, w, 6); c.fillRect(0, h - 22, w, 22);
+  });
+  const wall = texPlane("wall", 14, 3.2, texMat("wallM", wallT, 0.9), new V3(0, 1.6, 1.62), "-z", { noShadow: true });
+  wall.material.backFaceCulling = true;
+  const wall2 = texPlane("wall2", 14, 3.2, texMat("wall2M", wallT, 0.9), new V3(-3.2, 1.6, 0), "+x", { noShadow: true });
+  wall2.material.backFaceCulling = true;
+
+  const plaque = tex("plaqueT", 1024, 160, (c, w, h) => {
+    c.fillStyle = "#1c2b3a"; c.fillRect(0, 0, w, h); c.fillStyle = "#fff"; c.font = "bold 58px system-ui"; c.textAlign = "center";
+    c.fillText("LABORATÓRIO DE MÁQUINAS DE FLUXO", w / 2, 78); c.font = "32px system-ui"; c.fillStyle = "#b8c7d6";
+    c.fillText("Bancada 03 · Bomba centrífuga + monitoramento de condição", w / 2, 128);
+  });
+  texPlane("plaque", 1.6, 0.25, texMat("plaqueM", plaque, 0.6), new V3(0, 2.3, 1.61), "-z", { noShadow: true });
+  const sign = tex("signT", 256, 360, (c, w, h) => {
+    c.fillStyle = "#fff"; c.fillRect(0, 0, w, h); c.fillStyle = "#1560bd"; c.beginPath(); c.arc(w / 2, 120, 95, 0, 7); c.fill();
+    c.fillStyle = "#fff"; c.font = "bold 70px system-ui"; c.textAlign = "center"; c.fillText("EPI", w / 2, 145);
+    c.fillStyle = "#1560bd"; c.fillRect(0, 240, w, 120); c.fillStyle = "#fff"; c.font = "bold 26px system-ui";
+    c.fillText("USO OBRIGATÓRIO", w / 2, 285); c.fillText("ÓCULOS E PROTETOR", w / 2, 320); c.fillText("AURICULAR", w / 2, 350);
+  });
+  texPlane("sign", 0.3, 0.42, texMat("signM", sign, 0.6), new V3(1.75, 1.75, 1.61), "-z", { noShadow: true });
+  // tomada industrial 3P+T (azul, 220 V)
+  box("socket", 0.09, 0.12, 0.07, new V3(1.25, 0.45, 1.585), pbr("sockBlue", "#1f5fb8", 0, 0.45), { label: "quadro" });
+  cyl("plug", 0.032, 0.09, "z", new V3(1.25, 0.43, 1.52), pbr("plugBlue", "#2a6fcc", 0, 0.45), { label: "quadro" });
+})();
+
+/* ============ BANCADA ============ */
+(function buildBench() {
+  const t = 0.05, lh = TOP - 0.012 - 0.03;
+  [-1.075, 0, 1.075].forEach(x => [-0.425, 0.425].forEach(z => {
+    const h = (z > 0 && x !== 0) ? 1.84 - 0.03 : lh;
+    box("leg", t, h, t, new V3(x, 0.03 + h / 2, z), M.frame);
+    cyl("footStem", 0.008, 0.03, "y", new V3(x, 0.02, z), M.steel);
+    cyl("footPad", 0.03, 0.012, "y", new V3(x, 0.006, z), M.rubber);
+  }));
+  [TOP - 0.037, 0.16].forEach(y => {
+    [-0.425, 0.425].forEach(z => box("railX", 2.2, t, t, new V3(0, y, z), M.frame));
+    [-1.075, 0, 1.075].forEach(x => box("railZ", t, t, 0.8, new V3(x, y, 0), M.frame));
+  });
+  box("shelf", 2.18, 0.01, 0.86, new V3(0, 0.19, 0), M.top);
+  box("benchTop", 2.24, 0.012, 0.94, new V3(0, TOP - 0.006, 0), M.top);
+  box("upperRail", 2.2, t, t, new V3(0, 1.84, 0.425), M.frame);
+  const perf = tex("perfT", 256, 256, (c, w, h) => {
+    c.fillStyle = "#b3b8bc"; c.fillRect(0, 0, w, h); c.fillStyle = "#3b4045";
+    for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { c.beginPath(); c.arc(16 + i * 32, 16 + j * 32, 6.5, 0, 7); c.fill(); }
+  });
+  perf.uScale = 10.5; perf.vScale = 5;
+  box("backPanel", 2.1, 1.0, 0.006, new V3(0, TOP + 0.5, PZ + 0.003), texMat("perfM", perf, 0.5, 0.5));
+})();
+
+/* ============ BASE METÁLICA (perfis U) ============ */
+(function buildBase() {
+  const x0 = -0.40, x1 = 0.96, L = x1 - x0, xm = (x0 + x1) / 2, H = BTOP - TOP;
+  [-0.2, 0.2].forEach(z => {
+    const s = Math.sign(z);
+    box("uWeb", L, H, 0.008, new V3(xm, TOP + H / 2, z), M.base, { label: "base" });
+    box("uFlT", L, 0.008, 0.045, new V3(xm, BTOP - 0.004, z - s * 0.022), M.base, { label: "base" });
+    box("uFlB", L, 0.008, 0.045, new V3(xm, TOP + 0.004, z - s * 0.022), M.base, { label: "base" });
+  });
+  [x0 + 0.004, x1 - 0.004, 0.22].forEach(x => box("uCross", 0.008, H, 0.39, new V3(x, TOP + H / 2, 0), M.base, { label: "base" }));
+  box("deck", L, 0.006, 0.4, new V3(xm, BTOP - 0.003, 0), M.base, { label: "base" });
+  [[x0 + 0.05, -0.2], [x0 + 0.05, 0.2], [x1 - 0.05, -0.2], [x1 - 0.05, 0.2]].forEach(([x, z]) => {
+    const zz = z - Math.sign(z) * 0.022; hexNut("anchor", new V3(x, BTOP + 0.006, zz), V3.Up(), 0.012, 0.012, M.steel, { label: "base" });
+  });
+  // pedestal do motor (alinhamento de altura de eixo)
+  box("motorPed", 0.28, 0.08, 0.2, new V3(0.62, BTOP + 0.04, 0), M.base, { label: "base" });
+})();
+
+/* ============ BOMBA IMBIL INI 25-150 ============ */
+const cutaway = { shells: [], inner: [] };
+(function buildPump() {
+  const L = { label: "bomba" };
+  cyl("casingBody", 0.105, 0.09, "x", new V3(XC, AX, 0), M.pump, L);
+  // voluta em espiral + pescoço de recalque vertical (top-centerline)
+  const path = [], sc = [], phi0 = 0.35, N = 90;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, ph = phi0 + t * (2 * Math.PI - phi0), r = 0.09 + 0.025 * t;
+    path.push(new V3(XC, AX + r * Math.cos(ph), r * Math.sin(ph))); sc.push(0.016 + 0.018 * t);
+  }
+  const yTop = AX + 0.115, Rb = 0.05;
+  for (let i = 1; i <= 14; i++) { const ps = i / 14 * Math.PI / 2; path.push(new V3(XC, yTop + Rb - Rb * Math.cos(ps), Rb * Math.sin(ps))); sc.push(0.034 - 0.006 * i / 14); }
+  path.push(new V3(XC, NOZ.y, Rb)); sc.push(0.028);
+  const shape = []; for (let i = 0; i <= 24; i++) { const a = i / 24 * Math.PI * 2; shape.push(new V3(Math.cos(a), Math.sin(a), 0)); }
+  const vol = BABYLON.MeshBuilder.ExtrudeShapeCustom("volute", { shape, path, scaleFunction: i => sc[Math.min(i, sc.length - 1)], rotationFunction: () => 0, cap: BABYLON.Mesh.CAP_ALL }, scene);
+  vol.material = M.pump; reg(vol, L);
+  // bocal/flange de sucção DN40
+  cyl("sucNoz", 0.034, 0.08, "x", new V3(XC - 0.085, AX, 0), M.pump, Object.assign({ rTop: 0.046 }, L));
+  flangePair(new V3(-0.253, AX, 0), new V3(1, 0, 0), 0.075, 0.055, 4, M.pump, "bomba", "succao");
+  // bocal/flange de recalque DN25
+  flangePair(new V3(XC, NOZ.y + 0.008, 0.05), new V3(0, 1, 0), 0.0575, 0.0425, 4, M.pump, "bomba", "recalque");
+  // tampa traseira + parafusos
+  cyl("cover", 0.118, 0.018, "x", new V3(XC + 0.054, AX, 0), M.pump, L);
+  for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2 + 0.2; hexNut("cvBolt", new V3(XC + 0.066, AX + 0.108 * Math.cos(a), 0.108 * Math.sin(a)), new V3(1, 0, 0), 0.007, 0.008, M.steel, L); }
+  // bujões dreno / escorva
+  hexNut("drain", new V3(XC, AX - 0.108, -0.02), V3.Up(), 0.009, 0.012, M.steel, L);
+  // pé da carcaça
+  box("casFoot", 0.10, 0.03, 0.2, new V3(XC, BTOP + 0.015, 0), M.pump, L);
+  box("casWeb", 0.05, 0.04, 0.05, new V3(XC, BTOP + 0.045, 0), M.pump, L);
+  // lanterna/adaptador + suporte de mancal (banho de óleo)
+  const lan = cyl("lantern", 0.095, 0.077, "x", new V3(-0.0185, AX, 0), M.pump, Object.assign({ rTop: 0.068, static: false }, L));
+  const hsg = cyl("bearingHousing", 0.066, 0.22, "x", new V3(0.13, AX, 0), M.pump.clone("pumpShell"), Object.assign({ static: false }, L));
+  cutaway.shells.push(lan, hsg); lan.material = hsg.material;
+  [-1, 1].forEach(s => box("rib", 0.2, 0.012, 0.012, new V3(0.13, AX, s * 0.066), M.pump, L));
+  cyl("endCap", 0.05, 0.016, "x", new V3(0.248, AX, 0), M.pump, L);
+  for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + Math.PI / 4; hexNut("ecBolt", new V3(0.258, AX + 0.038 * Math.cos(a), 0.038 * Math.sin(a)), new V3(1, 0, 0), 0.005, 0.006, M.steel, L); }
+  // pé do suporte de mancal
+  box("brFoot", 0.08, 0.012, 0.17, new V3(0.17, BTOP + 0.006, 0), M.pump, L);
+  box("brWeb", 0.05, AX - 0.06 - BTOP, 0.03, new V3(0.17, (BTOP + AX - 0.06) / 2, 0), M.pump, L);
+  [-0.06, 0.06].forEach(z => hexNut("ftBolt", new V3(0.17, BTOP + 0.018, z), V3.Up(), 0.008, 0.01, M.steel, L));
+  [-0.07, 0.07].forEach(z => hexNut("ftBolt", new V3(XC, BTOP + 0.036, z), V3.Up(), 0.009, 0.01, M.steel, L));
+  // visor de nível de óleo (frente)
+  cyl("sightRing", 0.018, 0.012, "z", new V3(0.08, AX - 0.012, -0.068), M.brass, L);
+  const sg = tex("sightT", 128, 128, (c, w, h) => {
+    c.fillStyle = "#dfe6ea"; c.fillRect(0, 0, w, h); c.fillStyle = "#c77a10"; c.fillRect(0, h * 0.5, w, h * 0.5);
+    c.strokeStyle = "#c01818"; c.lineWidth = 5; c.beginPath(); c.moveTo(0, h * 0.5); c.lineTo(w, h * 0.5); c.stroke();
+  });
+  const disc = BABYLON.MeshBuilder.CreateDisc("sightGlass", { radius: 0.0125, tessellation: 28 }, scene);
+  disc.position = new V3(0.08, AX - 0.012, -0.0745); disc.material = texMat("sightM", sg, 0.1); reg(disc, Object.assign({ static: false }, L));
+  // bujão de enchimento com respiro
+  cyl("breather", 0.009, 0.02, "y", new V3(0.05, AX + 0.07, 0.02), M.brass, L);
+  cyl("breatherCap", 0.013, 0.008, "y", new V3(0.05, AX + 0.083, 0.02), M.brass, L);
+  hexNut("oilDrain", new V3(0.13, AX - 0.07, 0), V3.Up(), 0.008, 0.012, M.brass, L);
+  // placa de identificação
+  const np = tex("pumpPlate", 512, 300, (c, w, h) => {
+    c.fillStyle = "#cfd3d6"; c.fillRect(0, 0, w, h); c.strokeStyle = "#555"; c.lineWidth = 6; c.strokeRect(6, 6, w - 12, h - 12);
+    c.fillStyle = "#123a6e"; c.font = "bold 58px system-ui"; c.fillText("IMBIL", 26, 70);
+    c.fillStyle = "#222"; c.font = "bold 40px system-ui"; c.fillText("INI 25-150", 220, 68);
+    c.font = "28px system-ui"; ["Q = 6 m³/h    H = 32 mca", "n = 3500 rpm   Ø rotor 150", "Mancal: banho de óleo ISO VG 68", "Nº série 0000-26"].forEach((s, i) => c.fillText(s, 26, 125 + i * 42));
+  });
+  box("platePad", 0.074, 0.046, 0.006, new V3(0.185, AX + 0.004, -0.066), M.pump, L);
+  texPlane("pumpPlate", 0.068, 0.04, texMat("pumpPlateM", np, 0.35, 0.6), new V3(0.185, AX + 0.004, -0.0695), "-z", L);
+
+  // --- interior (visível no modo corte): eixo, rolamentos, óleo, ponta do termopar ---
+  const inn = (m) => { m.isVisible = false; cutaway.inner.push(m); return m; };
+  inn(cyl("shaftIn", 0.012, 0.3, "x", new V3(0.1, AX, 0), M.steel, { static: false }));
+  [0.045, 0.215].forEach(x => inn(reg(Object.assign(BABYLON.MeshBuilder.CreateTorus("brg", { diameter: 0.07, thickness: 0.022, tessellation: 32 }, scene), { material: M.steel }), { static: false })));
+  scene.meshes.filter(m => m.name === "brg").forEach((m, i) => { m.rotation.z = Math.PI / 2; m.position = new V3(i ? 0.215 : 0.045, AX, 0); });
+  const oil = BABYLON.MeshBuilder.CreateCylinder("oilBath", { height: 0.2, diameter: 0.114, arc: 0.5, enclosed: true, tessellation: 36 }, scene);
+  oil.rotation.z = -Math.PI / 2; oil.rotation.x = 0; oil.position = new V3(0.13, AX - 0.012, 0); oil.material = M.oil;
+  reg(oil, { static: false }); inn(oil); oil.metadata.oil = true;
+  inn(seg("tcTip", new V3(0.17, 1.1, -0.03), new V3(0.17, 1.012, -0.03), 0.0016, M.stain, { static: false, label: "termopar" }));
+})();
+
+function flangePair(c, dir, R, pcd, n, mat, labA, labB) {
+  const t = 0.016, gap = 0.002;
+  const a = c, b = c.add(dir.scale(dir.y ? t + gap : -(t + gap)));
+  seg("flA", a.subtract(dir.scale(t / 2)), a.add(dir.scale(t / 2)), R, mat, { tess: 36, label: labA });
+  seg("flB", b.subtract(dir.scale(t / 2)), b.add(dir.scale(t / 2)), R, M.galv, { tess: 36, label: labB });
+  const u = dir.y ? new V3(1, 0, 0) : new V3(0, 1, 0), w = V3.Cross(dir, u);
+  const mid = a.add(b).scale(0.5);
+  for (let k = 0; k < n; k++) {
+    const an = k / n * Math.PI * 2 + Math.PI / 4, off = u.scale(Math.cos(an) * pcd).add(w.scale(Math.sin(an) * pcd));
+    const p = mid.add(off);
+    seg("stud", p.subtract(dir.scale(0.03)), p.add(dir.scale(0.03)), 0.0055, M.steel, { label: labB });
+    hexNut("nut", p.add(dir.scale(0.026)), dir, 0.01, 0.01, M.steel, { label: labB });
+    hexNut("nut", p.subtract(dir.scale(0.026)), dir, 0.01, 0.01, M.steel, { label: labB });
+  }
+}
+
+/* ============ ACOPLAMENTO (rotativo) + PROTETOR ============ */
+const rotor = new BABYLON.TransformNode("rotor", scene); rotor.position = new V3(0, AX, 0);
+(function buildCoupling() {
+  const o = { parent: rotor, label: "motor" };
+  cyl("shaftP", 0.012, 0.09, "x", new V3(0.3, 0, 0), M.steel, o);
+  cyl("hubP", 0.042, 0.04, "x", new V3(0.355, 0, 0), M.steel, o);
+  cyl("spider", 0.037, 0.012, "x", new V3(0.381, 0, 0), M.rubber, o);
+  cyl("hubM", 0.042, 0.04, "x", new V3(0.407, 0, 0), M.steel, o);
+  cyl("shaftM", 0.012, 0.04, "x", new V3(0.44, 0, 0), M.steel, o);
+  for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; box("jaw", 0.024, 0.012, 0.016, new V3(0.381, 0.036 * Math.cos(a), 0.036 * Math.sin(a)), M.steel, o).rotation.x = -a; }
+  box("key", 0.03, 0.006, 0.008, new V3(0.355, 0.043, 0), M.black, o);
+  box("setScrew", 0.008, 0.006, 0.008, new V3(0.407, 0.043, 0), M.black, o);
+  // protetor de acoplamento perfurado (NR-12)
+  const gt = tex("guardT", 256, 256, (c, w, h) => {
+    c.fillStyle = "#e8b50f"; c.fillRect(0, 0, w, h); c.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) { c.beginPath(); c.arc(21 + i * 42.6, 21 + j * 42.6, 13, 0, 7); c.fill(); }
+  }, true);
+  gt.uScale = 3.5; gt.vScale = 5;
+  const gm = texMat("guardM", gt, 0.45, 0.2, { alphaTest: true });
+  const paths = [0.25, 0.465].map(x => { const a = []; for (let i = 0; i <= 30; i++) { const an = -0.35 + i / 30 * (Math.PI + 0.7); a.push(new V3(x, AX + 0.078 * Math.sin(an), 0.078 * Math.cos(an))); } return a; });
+  const guard = BABYLON.MeshBuilder.CreateRibbon("guard", { pathArray: paths, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
+  guard.material = gm; reg(guard, { static: false, label: "motor" });
+  [0.27, 0.445].forEach(x => [-1, 1].forEach(s => box("guardLeg", 0.02, AX - 0.02 - BTOP, 0.004, new V3(x, (BTOP + AX - 0.02) / 2, s * 0.08), M.yellow, { label: "motor" })));
+})();
+
+/* ============ MOTOR TRIFÁSICO 3 cv – 2 polos – carcaça 90L ============ */
+(function buildMotor() {
+  const L = { label: "motor" }, xa = 0.48, xb = 0.76, xm = (xa + xb) / 2;
+  cyl("mBody", 0.088, xb - xa, "x", new V3(xm, AX, 0), M.motor, L);
+  for (let k = 0; k < 30; k++) {
+    const a = k / 30 * Math.PI * 2; if (Math.abs(Math.sin(a) + 1) < 0.08) continue;
+    const f = box("fin", xb - xa - 0.01, 0.015, 0.004, new V3(xm, AX + 0.094 * Math.sin(a), 0.094 * Math.cos(a)), M.motor, L);
+    f.rotation.x = -a + Math.PI / 2;
+  }
+  cyl("deShield", 0.085, 0.03, "x", new V3(0.465, AX, 0), M.motor, L);
+  cyl("deBoss", 0.035, 0.02, "x", new V3(0.442, AX, 0), M.motor, L);
+  cyl("ndeShield", 0.085, 0.02, "x", new V3(0.77, AX, 0), M.motor, L);
+  cyl("fanCover", 0.093, 0.11, "x", new V3(0.835, AX, 0), M.motor, L);
+  const grill = tex("grillT", 256, 256, (c, w, h) => {
+    c.fillStyle = "#2d6b44"; c.fillRect(0, 0, w, h); c.strokeStyle = "#0c1410"; c.lineWidth = 7;
+    for (let r = 30; r < 118; r += 16) { for (let s = 0; s < 8; s++) { c.beginPath(); c.arc(128, 128, r, s * Math.PI / 4 + 0.08, (s + 1) * Math.PI / 4 - 0.08); c.stroke(); } }
+    c.fillStyle = "#2d6b44"; c.beginPath(); c.arc(128, 128, 22, 0, 7); c.fill();
+  });
+  const gd = BABYLON.MeshBuilder.CreateDisc("grill", { radius: 0.09, tessellation: 40 }, scene);
+  gd.rotation.y = -Math.PI / 2; gd.position = new V3(0.8905, AX, 0); gd.material = texMat("grillM", grill, 0.4, 0.15); reg(gd, Object.assign({ static: false }, L));
+  for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + Math.PI / 4; hexNut("tieRod", new V3(0.452, AX + 0.07 * Math.cos(a), 0.07 * Math.sin(a)), new V3(1, 0, 0), 0.006, 0.006, M.steel, L); }
+  [0.53, 0.71].forEach(x => {
+    box("mFoot", 0.05, 0.012, 0.17, new V3(x, AX - 0.09 + 0.006, 0), M.motor, L);
+    box("mFootWeb", 0.04, 0.03, 0.1, new V3(x, AX - 0.07, 0), M.motor, L);
+    [-0.07, 0.07].forEach(z => hexNut("mBolt", new V3(x, AX - 0.074, z), V3.Up(), 0.009, 0.01, M.steel, L));
+  });
+  // caixa de ligação
+  box("tBox", 0.11, 0.05, 0.1, new V3(0.645, 1.165, 0), M.motor, L);
+  box("tLid", 0.116, 0.008, 0.106, new V3(0.645, 1.194, 0), M.motor, L);
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => cyl("tScrew", 0.004, 0.004, "y", new V3(0.645 + a * 0.049, 1.2, b * 0.044), M.steel, L));
+  cyl("gland", 0.011, 0.02, "z", new V3(0.645, 1.162, 0.06), M.black, { label: "motor" });
+  hexNut("glandNut", new V3(0.645, 1.162, 0.052), new V3(0, 0, 1), 0.014, 0.006, M.black, { label: "motor" });
+  // placa de identificação do motor
+  const mp = tex("motorPlate", 512, 300, (c, w, h) => {
+    c.fillStyle = "#d4d7da"; c.fillRect(0, 0, w, h); c.strokeStyle = "#444"; c.lineWidth = 6; c.strokeRect(6, 6, w - 12, h - 12);
+    c.fillStyle = "#222"; c.font = "bold 36px system-ui"; c.fillText("MOTOR DE INDUÇÃO TRIFÁSICO", 22, 54);
+    c.font = "27px system-ui"; ["3 cv (2,2 kW)   2 polos   60 Hz", "220/380 V   8,1/4,7 A   3505 rpm", "Carcaça 90L   IP55   Isol. F", "FS 1,15   Reg. S1   η 86 %"].forEach((s, i) => c.fillText(s, 22, 110 + i * 44));
+  });
+  texPlane("motorPlate", 0.085, 0.05, texMat("motorPlateM", mp, 0.35, 0.6), new V3(0.62, AX + 0.01, -0.106), "-z", L);
+})();
+
+/* ============ RESERVATÓRIO (acrílico, ~105 L) ============ */
+(function buildTank() {
+  const L = { label: "reservatorio" };
+  const x0 = -1.06, x1 = -0.56, z0 = -0.28, z1 = 0.28, y0 = TOP + 0.03, y1 = 1.33;
+  const xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, W = x1 - x0, D = z1 - z0, H = y1 - y0;
+  [-1, 1].forEach(s => box("tankRunner", W + 0.02, 0.03, 0.04, new V3(xm, TOP + 0.015, s * 0.22), M.stain, L));
+  const walls = [
+    box("acF", W, H, 0.01, new V3(xm, ym, z0), M.acrylic), box("acB", W, H, 0.01, new V3(xm, ym, z1), M.acrylic),
+    box("acL", 0.01, H, D, new V3(x0, ym, 0), M.acrylic), box("acR", 0.01, H, D, new V3(x1, ym, 0), M.acrylic)];
+  walls.forEach(w => { w.alphaIndex = 2; w.metadata.label = "reservatorio"; w.isPickable = true; });
+  box("tankBottom", W, 0.012, D, new V3(xm, y0 + 0.006, 0), M.stain, L);
+  [[x0, z0], [x0, z1], [x1, z0], [x1, z1]].forEach(([x, z]) => box("tankPost", 0.022, H, 0.022, new V3(x, ym, z), M.stain, L));
+  [y1, y0 + 0.012].forEach(y => { [z0, z1].forEach(z => box("tankRimX", W + 0.02, 0.018, 0.022, new V3(xm, y, z), M.stain, L)); [x0, x1].forEach(x => box("tankRimZ", 0.022, 0.018, D, new V3(x, y, 0), M.stain, L)); });
+  const wl = 1.22;
+  const water = box("water", W - 0.014, wl - y0 - 0.012, D - 0.014, new V3(xm, (wl + y0 + 0.012) / 2, 0), M.water);
+  water.alphaIndex = 1; water.metadata.label = "reservatorio"; water.isPickable = true;
+  const rt = tex("rulerT", 64, 512, (c, w, h) => {
+    c.fillStyle = "rgba(255,255,255,.92)"; c.fillRect(0, 0, w, h); c.fillStyle = "#111"; c.font = "bold 14px system-ui";
+    for (let i = 0; i <= 45; i++) { const y = h - 8 - i * (h - 16) / 45; c.fillRect(0, y, i % 5 ? 14 : 28, 2); if (i % 10 === 0) c.fillText(String(i), 32, y + 5); }
+  });
+  texPlane("ruler", 0.035, 0.46, texMat("rulerM", rt, 0.5), new V3(x1 - 0.04, y0 + 0.24, z0 - 0.006), "-z", L);
+  // saída (bulkhead) para sucção e dreno
+  cyl("bulk", 0.042, 0.014, "x", new V3(x1 + 0.012, AX, 0), M.stain, { label: "succao" });
+  cyl("drainV", 0.012, 0.06, "z", new V3(-0.7, 0.87, z0 - 0.03), M.brass, L);
+  box("drainLever", 0.05, 0.004, 0.01, new V3(-0.7, 0.887, z0 - 0.045), M.red, L);
+})();
+
+/* ============ TUBULAÇÕES ============ */
+function gauge(name, center, stemFrom, label, range, unit, title, lab) {
+  const r = 0.045;
+  cyl(name + "Case", r, 0.028, "z", center, M.stain, { label: lab });
+  const dt = tex(name + "Dial", 512, 512, (c, w, h) => {
+    const cx = w / 2, cy = h / 2; c.fillStyle = "#fbfbf8"; c.fillRect(0, 0, w, h);
+    c.strokeStyle = "#111"; c.fillStyle = "#111"; c.textAlign = "center";
+    const [a, b, step, major] = range, n = Math.round((b - a) / step);
+    for (let i = 0; i <= n; i++) {
+      const v = a + i * step, ang = (-135 + 270 * i / n) * Math.PI / 180, big = Math.abs((v - a) / major - Math.round((v - a) / major)) < 1e-6;
+      const r0 = big ? 175 : 190; c.lineWidth = big ? 6 : 3; c.beginPath();
+      c.moveTo(cx + r0 * Math.sin(ang), cy - r0 * Math.cos(ang)); c.lineTo(cx + 215 * Math.sin(ang), cy - 215 * Math.cos(ang)); c.stroke();
+      if (big) { c.font = "bold 38px system-ui"; c.fillText(String(+v.toFixed(1)).replace(".", ","), cx + 140 * Math.sin(ang), cy - 140 * Math.cos(ang) + 13); }
+    }
+    c.font = "bold 34px system-ui"; c.fillText(unit, cx, cy + 95); c.font = "24px system-ui"; c.fillText(title, cx, cy + 135);
+    c.lineWidth = 8; c.beginPath(); c.arc(cx, cy, 238, 0, 7); c.stroke();
+  });
+  texPlane(name + "Face", 2 * r * 0.98, 2 * r * 0.98, texMat(name + "DialM", dt, 0.35), center.add(new V3(0, 0, -0.0145)), "-z", { label: lab });
+  const glass = BABYLON.MeshBuilder.CreateDisc(name + "Glass", { radius: r * 0.98, tessellation: 36 }, scene);
+  glass.position = center.add(new V3(0, 0, -0.018)); glass.material = M.glass; reg(glass, { static: false });
+  const needle = new BABYLON.TransformNode(name + "N", scene); needle.position = center.add(new V3(0, 0, -0.0155));
+  box(name + "Needle", 0.0025, 0.038, 0.001, new V3(0, 0.014, 0), M.red, { parent: needle });
+  cyl(name + "Hub", 0.004, 0.003, "z", new V3(0, 0, 0), M.black, { parent: needle });
+  seg(name + "Stem", stemFrom, center.add(stemFrom.subtract(center).normalize().scale(r * 0.9)), 0.007, M.brass, { label: lab });
+  return { node: needle, set(v) { const [a, b] = range; this.node.rotation.z = -((-135 + 270 * (Math.min(b, Math.max(a, v)) - a) / (b - a)) * Math.PI / 180); } };
+}
+let gaugeD, gaugeS, valveWheel;
+(function buildPiping() {
+  // ---- SUCÇÃO DN40 (Ø ext 48 mm): reservatório → válvula esfera → união → tê/manovacuômetro → flange da bomba
+  const rS = 0.024, SL = { label: "succao" };
+  seg("sucPipe", new V3(-0.548, AX, 0), new V3(-0.27, AX, 0), rS, M.galv, SL);
+  // válvula esfera
+  sph("bvBody", 0.036, new V3(-0.47, AX, 0), M.stain, Object.assign({ scale: new V3(1.25, 1, 1) }, SL));
+  [-0.512, -0.428].forEach(x => hexNut("bvEnd", new V3(x, AX, 0), new V3(1, 0, 0), 0.033, 0.022, M.stain, SL));
+  cyl("bvStem", 0.006, 0.035, "y", new V3(-0.47, AX + 0.045, 0), M.stain, SL);
+  box("bvLever", 0.13, 0.005, 0.02, new V3(-0.43, AX + 0.064, 0), M.red, SL);
+  // união
+  hexNut("union", new V3(-0.39, AX, 0), new V3(1, 0, 0), 0.034, 0.024, M.galv, SL);
+  cyl("unionRing", 0.03, 0.012, "x", new V3(-0.372, AX, 0), M.galv, SL);
+  // tê + manovacuômetro
+  cyl("teeS", 0.03, 0.06, "x", new V3(-0.33, AX, 0), M.galv, SL);
+  cyl("teeSb", 0.026, 0.035, "y", new V3(-0.33, AX + 0.035, 0), M.galv, SL);
+  gaugeS = gauge("gS", new V3(-0.33, AX + 0.14, 0), new V3(-0.33, AX + 0.05, 0), "", [-1, 1.5, 0.1, 0.5], "bar", "MANOVACUÔMETRO", "succao");
+
+  // ---- RECALQUE DN25 (Ø ext 33,7 mm): bomba → tê/manômetro → válvula globo → retorno submerso
+  const rD = 0.017, DL = { label: "recalque" }, z = 0.05;
+  const pts = [new V3(XC, NOZ.y + 0.026, z), new V3(XC, 1.64, z), new V3(-0.80, 1.64, z), new V3(-0.80, 1.12, z)];
+  const rp = roundedPath(pts, 0.055);
+  tube("disPipe", rp.path, rD, M.galv, Object.assign({ tess: 20 }, DL));
+  rp.corners.forEach(c => tube("elbow", dedupe([c.A.subtract(c.d1.scale(0.02)), ...c.arc, c.B.add(c.d2.scale(0.02))]), rD * 1.3, M.galv, Object.assign({ tess: 20 }, DL)));
+  cyl("teeD", 0.024, 0.055, "y", new V3(XC, 1.36, z), M.galv, DL);
+  cyl("teeDb", 0.02, 0.04, "z", new V3(XC, 1.36, z - 0.03), M.galv, DL);
+  gaugeD = gauge("gD", new V3(XC, 1.36, z - 0.085), new V3(XC, 1.36, z - 0.05), "", [0, 6, 0.2, 1], "bar", "MANÔMETRO", "recalque");
+  // gaugeD tem conexão traseira: haste ao longo de z
+  // válvula globo
+  sph("gvBody", 0.03, new V3(XC, 1.48, z), M.brass, Object.assign({ scale: new V3(1, 1.3, 1) }, DL));
+  [1.44, 1.52].forEach(y => hexNut("gvEnd", new V3(XC, y, z), V3.Up(), 0.025, 0.018, M.brass, DL));
+  cyl("gvBonnet", 0.015, 0.045, "z", new V3(XC, 1.48, z - 0.045), M.brass, DL);
+  cyl("gvStem", 0.004, 0.03, "z", new V3(XC, 1.48, z - 0.08), M.stain, DL);
+  valveWheel = BABYLON.MeshBuilder.CreateTorus("gvWheel", { diameter: 0.07, thickness: 0.008, tessellation: 36 }, scene);
+  valveWheel.rotation.x = Math.PI / 2; valveWheel.position = new V3(XC, 1.48, z - 0.095); valveWheel.material = M.red; reg(valveWheel, DL);
+  for (let k = 0; k < 3; k++) { const a = k * Math.PI * 2 / 3; seg("spoke", new V3(XC, 1.48, z - 0.095), new V3(XC + 0.035 * Math.cos(a), 1.48 + 0.035 * Math.sin(a), z - 0.095), 0.003, M.red, DL); }
+  hexNut("unionD", new V3(XC, 1.56, z), V3.Up(), 0.026, 0.02, M.galv, DL);
+  // suporte de tubulação (mão-francesa)
+  box("pipePost", 0.03, 1.60 - TOP, 0.03, new V3(-0.45, (TOP + 1.60) / 2, 0.2), M.frame, DL);
+  box("pipeArm", 0.03, 0.02, 0.18, new V3(-0.45, 1.612, 0.125), M.frame, DL);
+  box("postPlate", 0.1, 0.008, 0.1, new V3(-0.45, TOP + 0.004, 0.2), M.frame, DL);
+  const ub = []; for (let i = 0; i <= 16; i++) { const a = Math.PI * i / 16; ub.push(new V3(-0.45, 1.64 + 0.02 * Math.cos(a - Math.PI / 2 + Math.PI / 2) * 0 + 0.021 * Math.sin(a), z + 0.021 * Math.cos(a))); }
+  tube("uBolt", ub, 0.003, M.steel, DL);
+})();
+
+/* ============ QUADRO DE COMANDO + CAIXA DE PASSAGEM ============ */
+let lamp, eStop;
+(function buildPanel() {
+  const L = { label: "quadro" }, cx = 0.82, cy = 1.44, w = 0.40, h = 0.44, d = 0.16, zf = PZ - d;
+  box("qBody", w, h, d, new V3(cx, cy, PZ - d / 2), M.panel, L);
+  box("qDoor", w - 0.01, h - 0.01, 0.012, new V3(cx, cy, zf - 0.006), M.panel, L);
+  const dt = tex("doorT", 512, 564, (c, W, H) => {
+    c.fillStyle = "#cfd3d6"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#1c2b3a"; c.fillRect(40, 26, W - 80, 58); c.fillStyle = "#fff"; c.font = "bold 28px system-ui"; c.textAlign = "center";
+    c.fillText("QUADRO DE COMANDO", W / 2, 58); c.font = "18px system-ui"; c.fillText("MOTOR DA BOMBA · 220 V 3~ 60 Hz", W / 2, 78);
+    c.fillStyle = "#111"; c.font = "bold 18px system-ui";
+    c.fillText("EMERGÊNCIA", W / 2, 232); [["LIGA", 0.3], ["DESLIGA", 0.5], ["MOTOR LIGADO", 0.7]].forEach(([s, f]) => c.fillText(s, W * f, 360));
+    c.fillText("CHAVE GERAL", W / 2, 530);
+    c.fillStyle = "#f2c200"; c.beginPath(); c.moveTo(440, 470); c.lineTo(490, 550); c.lineTo(390, 550); c.closePath(); c.fill();
+    c.fillStyle = "#111"; c.font = "bold 44px system-ui"; c.fillText("⚡", 440, 540);
+  });
+  texPlane("doorFace", w - 0.012, h - 0.012, texMat("doorM", dt, 0.45), new V3(cx, cy, zf - 0.0125), "-z", L);
+  const zb = zf - 0.013;
+  cyl("esRing", 0.036, 0.004, "z", new V3(cx, 1.58, zb - 0.002), M.yellow, L);
+  eStop = sph("esHead", 0.024, new V3(cx, 1.58, zb - 0.02), M.red, Object.assign({ scale: new V3(1, 1, 0.6) }, L));
+  cyl("esStem", 0.012, 0.014, "z", new V3(cx, 1.58, zb - 0.009), M.black, L);
+  [[cx - 0.08, M.green], [cx, M.red]].forEach(([x, m]) => { cyl("bBezel", 0.017, 0.01, "z", new V3(x, 1.46, zb - 0.005), M.stain, L); cyl("btn", 0.012, 0.008, "z", new V3(x, 1.46, zb - 0.013), m, L); });
+  cyl("lBezel", 0.017, 0.01, "z", new V3(cx + 0.08, 1.46, zb - 0.005), M.stain, L);
+  lamp = sph("lamp", 0.013, new V3(cx + 0.08, 1.46, zb - 0.012), M.lampOn, Object.assign({ scale: new V3(1, 1, 0.7), static: false }, L));
+  box("mainSwBase", 0.07, 0.07, 0.006, new V3(cx, 1.3, zb - 0.003), M.yellow, L);
+  box("mainSwHandle", 0.012, 0.06, 0.018, new V3(cx, 1.3, zb - 0.014), M.red, L);
+  box("handle", 0.014, 0.06, 0.02, new V3(cx + 0.18, cy, zb - 0.01), M.black, L);
+  [cy - 0.15, cy + 0.15].forEach(y => cyl("hinge", 0.006, 0.04, "y", new V3(cx - 0.2, y, zf - 0.004), M.steel, L));
+
+  // caixa de passagem com tampa transparente: condutores separados, SCT-013 em L1
+  const jx = 0.79, jy = 1.01, jw = 0.24, jh = 0.16, jd = 0.085, jz0 = PZ - jd;
+  box("jBack", jw, jh, 0.004, new V3(jx, jy, PZ - 0.002), M.encl, L);
+  box("jTop", jw, 0.006, jd, new V3(jx, jy + jh / 2, PZ - jd / 2), M.encl, L);
+  box("jBot", jw, 0.006, jd, new V3(jx, jy - jh / 2, PZ - jd / 2), M.encl, L);
+  box("jL", 0.006, jh, jd, new V3(jx - jw / 2, jy, PZ - jd / 2), M.encl, L);
+  box("jR", 0.006, jh, jd, new V3(jx + jw / 2, jy, PZ - jd / 2), M.encl, L);
+  const jl = box("jLid", jw, jh, 0.004, new V3(jx, jy, jz0 - 0.002), M.lid); jl.alphaIndex = 3;
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => cyl("jScrew", 0.005, 0.004, "z", new V3(jx + a * 0.108, jy + b * 0.068, jz0 - 0.005), M.stain, L));
+  const zc = 0.39;
+  cyl("jGlandT", 0.011, 0.022, "y", new V3(0.82, jy + jh / 2 + 0.008, zc), M.black, L);
+  cyl("jGlandB", 0.011, 0.022, "y", new V3(0.76, jy - jh / 2 - 0.008, zc), M.black, L);
+  cyl("jGlandL", 0.008, 0.02, "x", new V3(jx - jw / 2 - 0.007, 1.0, zc), M.black, L);
+  cyl("qGland", 0.011, 0.02, "y", new V3(0.82, cy - h / 2 - 0.008, zc), M.black, L);
+  // condutores: L1 preto, L2 cinza, L3 marrom, PE verde-amarelo
+  [[0.775, M.cableK], [0.80, M.cableW], [0.825, M.cableBr], [0.85, M.cableGY]].forEach(([x, m]) =>
+    tube("cond", spline([new V3(0.82, 1.075, zc), new V3(x, 1.05, zc), new V3(x, 0.98, zc), new V3(0.76, 0.945, zc)], 10), 0.0028, m, { label: "sct" }));
+  tube("jacketIn", [new V3(0.82, 1.09, zc), new V3(0.82, 1.074, zc)], 0.0068, M.cableK, L);
+  tube("jacketIn2", [new V3(0.76, 0.93, zc), new V3(0.76, 0.946, zc)], 0.0068, M.cableK, L);
+
+  // SCT-013 (núcleo dividido, janela 13 mm) abraçando SOMENTE a fase L1
+  const sx = 0.775, sy = 1.015, ring = [], rect = [new V3(-0.004, -0.011, 0), new V3(0.004, -0.011, 0), new V3(0.004, 0.011, 0), new V3(-0.004, 0.011, 0), new V3(-0.004, -0.011, 0)];
+  for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 2; ring.push(new V3(sx + 0.0105 * Math.cos(a), sy, zc + 0.0105 * Math.sin(a))); }
+  const sct = BABYLON.MeshBuilder.ExtrudeShape("sctRing", { shape: rect, path: ring, cap: BABYLON.Mesh.NO_CAP, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
+  sct.material = M.sct; reg(sct, { label: "sct", static: false });
+  box("sctHead", 0.024, 0.024, 0.03, new V3(sx - 0.024, sy, zc), M.sct, { label: "sct" });
+  box("sctLatch", 0.006, 0.026, 0.012, new V3(sx + 0.016, sy, zc), M.sct, { label: "sct" });
+  tube("sctLeadIn", spline([new V3(sx - 0.036, sy, zc), new V3(0.71, 1.005, zc), new V3(0.67, 1.0, zc)]), 0.0022, M.cableK, { label: "sct" });
+})();
+
+/* ============ CAIXA DE CONTROLE ESP32 ============ */
+let espLed;
+(function buildESP() {
+  const cx = 0.27, cy = 1.33, w = 0.34, h = 0.26, d = 0.11, zf = PZ - d, E = { label: "esp32" };
+  box("eBack", w, h, 0.004, new V3(cx, cy, PZ - 0.002), M.encl, E);
+  box("eTop", w, 0.006, d, new V3(cx, cy + h / 2, PZ - d / 2), M.encl, E);
+  box("eBot", w, 0.006, d, new V3(cx, cy - h / 2, PZ - d / 2), M.encl, E);
+  box("eL", 0.006, h, d, new V3(cx - w / 2, cy, PZ - d / 2), M.encl, E);
+  box("eR", 0.006, h, d, new V3(cx + w / 2, cy, PZ - d / 2), M.encl, E);
+  const lid = box("eLid", w, h, 0.004, new V3(cx, cy, zf - 0.002), M.lid); lid.alphaIndex = 3;
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => cyl("eScrew", 0.005, 0.004, "z", new V3(cx + a * 0.155, cy + b * 0.115, zf - 0.005), M.stain, E));
+  const mp = pbr("mountPlate", "#e98b2a", 0.1, 0.5);
+  box("ePlate", w - 0.02, h - 0.02, 0.003, new V3(cx, cy, PZ - 0.0055), mp, E);
+  // trilho DIN + fonte 5 V + bornes
+  box("din", 0.3, 0.035, 0.008, new V3(cx, 1.425, PZ - 0.011), M.alu, E);
+  box("psu", 0.05, 0.09, 0.055, new V3(0.395, 1.4, PZ - 0.043), M.encl, E);
+  const pt = tex("psuT", 128, 230, (c, W, H) => { c.fillStyle = "#e9ecef"; c.fillRect(0, 0, W, H); c.fillStyle = "#222"; c.font = "bold 22px system-ui"; c.textAlign = "center"; c.fillText("FONTE", W / 2, 60); c.fillText("5 V ⎓", W / 2, 110); c.fillText("2 A", W / 2, 140); c.fillStyle = "#12b886"; c.beginPath(); c.arc(W / 2, 190, 9, 0, 7); c.fill(); });
+  texPlane("psuFace", 0.046, 0.086, texMat("psuM", pt, 0.5), new V3(0.395, 1.4, PZ - 0.0712), "-z", E);
+  for (let i = 0; i < 5; i++) box("borne", 0.006, 0.045, 0.04, new V3(0.325 + i * 0.0075, 1.425, PZ - 0.03), i === 4 ? M.cableGY : M.encl, E);
+  // placa base (perfurada)
+  box("carrier", 0.2, 0.11, 0.0016, new V3(0.245, 1.29, PZ - 0.018), M.pcbG, E);
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => cyl("standoff", 0.003, 0.01, "z", new V3(0.245 + a * 0.09, 1.29 + b * 0.047, PZ - 0.012), M.brass, E));
+  // ESP32 DevKit
+  const ez = PZ - 0.03;
+  box("espPcb", 0.055, 0.028, 0.0016, new V3(0.255, 1.31, ez), M.chip, E);
+  [-1, 1].forEach(s => box("espHdr", 0.048, 0.0026, 0.009, new V3(0.255, 1.31 + s * 0.0125, ez + 0.005), M.black, E));
+  box("wroom", 0.018, 0.0255, 0.003, new V3(0.237, 1.31, ez - 0.0023), M.stain, E);
+  const et = tex("espT", 512, 260, (c, W, H) => {
+    c.fillStyle = "#16181b"; c.fillRect(0, 0, W, H); c.fillStyle = "#c8a34a";
+    for (let i = 0; i < 19; i++) { c.beginPath(); c.arc(40 + i * 24, 14, 6, 0, 7); c.fill(); c.beginPath(); c.arc(40 + i * 24, H - 14, 6, 0, 7); c.fill(); }
+    c.fillStyle = "#eee"; c.font = "bold 26px system-ui"; c.fillText("ESP32-DevKitC", 230, 115); c.font = "18px system-ui"; c.fillText("GPIO 5·18·19·21·22·34", 230, 150);
+    c.fillStyle = "#777"; c.fillRect(470, 100, 40, 60);
+  });
+  texPlane("espFace", 0.055, 0.028, texMat("espM", et, 0.45), new V3(0.255, 1.31, ez - 0.0009), "-z", E);
+  const wt = tex("wroomT", 180, 256, (c, W, H) => { c.fillStyle = "#c9ccd0"; c.fillRect(0, 0, W, H); c.fillStyle = "#333"; c.font = "bold 20px system-ui"; c.fillText("ESP32-", 20, 110); c.fillText("WROOM-32", 20, 138); c.fillStyle = "#1b1b1b"; c.fillRect(0, 0, W, 50); });
+  texPlane("wroomFace", 0.0175, 0.025, texMat("wroomM", wt, 0.3, 0.8), new V3(0.237, 1.31, ez - 0.0039), "-z", E);
+  box("usb", 0.006, 0.008, 0.003, new V3(0.28, 1.31, ez - 0.002), M.stain, E);
+  espLed = sph("espLed", 0.0015, new V3(0.272, 1.301, ez - 0.0012), M.ledM, { static: false, label: "esp32" });
+  // MAX6675 (placa vermelha) com borne para termopar tipo K
+  const mz = PZ - 0.026;
+  const mt = tex("maxT", 256, 160, (c, W, H) => { c.fillStyle = "#b3161c"; c.fillRect(0, 0, W, H); c.fillStyle = "#fff"; c.font = "bold 22px system-ui"; c.fillText("MAX6675", 70, 34); c.font = "15px system-ui"; ["GND VCC SCK CS SO"].forEach(s => c.fillText(s, 40, 150)); c.fillStyle = "#111"; c.fillRect(95, 58, 70, 52); });
+  box("maxPcb", 0.025, 0.017, 0.0016, new V3(0.182, 1.275, mz), M.red, { label: "max6675" });
+  texPlane("maxFace", 0.025, 0.017, texMat("maxM", mt, 0.45), new V3(0.182, 1.275, mz - 0.0009), "-z", { label: "max6675" });
+  box("maxChip", 0.005, 0.004, 0.0015, new V3(0.182, 1.277, mz - 0.0016), M.chip, { label: "max6675" });
+  box("maxTerm", 0.01, 0.007, 0.008, new V3(0.182, 1.262, mz - 0.004), M.blueTerm, { label: "max6675" });
+  // condicionamento do SCT-013 (burden 33 Ω + polarização 1,65 V) com jack P2
+  box("sctPcb", 0.035, 0.025, 0.0016, new V3(0.318, 1.265, mz), M.pcbG, { label: "sct" });
+  cyl("jack", 0.004, 0.012, "z", new V3(0.31, 1.258, mz - 0.006), M.black, { label: "sct" });
+  [0.318, 0.326].forEach(x => cyl("res", 0.0012, 0.006, "x", new V3(x, 1.272, mz - 0.002), M.beige, { label: "sct" }));
+  cyl("cap", 0.003, 0.008, "z", new V3(0.33, 1.262, mz - 0.004), M.chip, { label: "sct" });
+  // jumpers internos
+  const jmp = (a, b, m) => tube("jumper", spline([a, a.add(b).scale(0.5).add(new V3(0, 0, -0.012)), b], 10), 0.0009, m, { label: "esp32" });
+  jmp(new V3(0.19, 1.284, mz - 0.002), new V3(0.235, 1.297, ez - 0.004), pbr("jOr", "#e8590c", 0, 0.5));
+  jmp(new V3(0.186, 1.284, mz - 0.002), new V3(0.24, 1.297, ez - 0.004), pbr("jVi", "#7048e8", 0, 0.5));
+  jmp(new V3(0.31, 1.276, mz - 0.002), new V3(0.27, 1.297, ez - 0.004), pbr("jBl", "#1c7ed6", 0, 0.5));
+  jmp(new V3(0.395, 1.355, PZ - 0.07), new V3(0.28, 1.324, ez - 0.004), M.red);
+  // prensa-cabos
+  [0.17, 0.23, 0.29].forEach(x => cyl("eGland", 0.008, 0.02, "y", new V3(x, cy - h / 2 - 0.007, 0.38), M.black, E));
+  cyl("eGlandR", 0.008, 0.02, "x", new V3(cx + w / 2 + 0.007, 1.35, 0.38), M.black, E);
+  cyl("qGlandL", 0.008, 0.02, "x", new V3(0.62 - 0.007, 1.35, 0.36), M.black, { label: "quadro" });
+  // cabos internos até as placas
+  tube("tcIn", spline([new V3(0.17, 1.2, 0.38), new V3(0.175, 1.235, 0.41), new V3(0.182, 1.258, mz - 0.005)]), 0.0022, M.cableY, { label: "termopar" });
+  tube("mpuIn", spline([new V3(0.23, 1.2, 0.38), new V3(0.235, 1.255, 0.41), new V3(0.255, 1.297, ez - 0.004)]), 0.0024, M.cableG, { label: "mpu" });
+  tube("sctIn", spline([new V3(0.29, 1.2, 0.38), new V3(0.3, 1.24, 0.405), new V3(0.31, 1.252, mz - 0.012)]), 0.002, M.cableK, { label: "sct" });
+  const lt = tex("eLbl", 512, 70, (c, W, H) => { c.fillStyle = "#1c2b3a"; c.fillRect(0, 0, W, H); c.fillStyle = "#fff"; c.font = "bold 30px system-ui"; c.textAlign = "center"; c.fillText("CAIXA DE CONTROLE · ESP32", W / 2, 46); });
+  texPlane("eLabel", 0.2, 0.027, texMat("eLblM", lt, 0.5), new V3(cx, cy + h / 2 - 0.022, zf - 0.0045), "-z", E);
+})();
+
+/* ============ SENSORES NO CAMPO ============ */
+(function buildSensors() {
+  // ---- Termopar tipo K no suporte de mancal (conexão de compressão 1/4" NPT, ponta imersa no óleo)
+  const T = { label: "termopar" }, tx = 0.17, tz = -0.03, ys = AX + Math.sqrt(0.066 * 0.066 - tz * tz);
+  cyl("tcBoss", 0.012, 0.014, "y", new V3(tx, ys - 0.002, tz), M.pump, T);
+  hexNut("tcFit", new V3(tx, ys + 0.011, tz), V3.Up(), 0.0095, 0.012, M.stain, T);
+  hexNut("tcNut", new V3(tx, ys + 0.022, tz), V3.Up(), 0.0078, 0.01, M.stain, T);
+  seg("tcSheath", new V3(tx, ys + 0.026, tz), new V3(tx, ys + 0.062, tz), 0.0016, M.stain, T);
+  seg("tcTrans", new V3(tx, ys + 0.062, tz), new V3(tx, ys + 0.088, tz), 0.0042, M.stain, T);
+  tube("tcCable", spline([new V3(tx, ys + 0.087, tz), new V3(tx, ys + 0.12, tz + 0.01), new V3(0.18, 1.24, 0.08), new V3(0.18, 1.14, 0.26), new V3(0.17, 1.12, 0.37), new V3(0.17, 1.16, 0.38), new V3(0.17, 1.186, 0.38)], 16), 0.0025, M.cableY, T);
+
+  // ---- MPU-6050 (GY-521) fixado na carcaça do motor, lado acoplado
+  const P = { label: "mpu" }, mx = 0.51, my = AX + 0.105;
+  box("mpuPad", 0.032, 0.024, 0.03, new V3(mx, AX + 0.093, 0), M.alu, P);
+  box("mpuPcb", 0.021, 0.0016, 0.016, new V3(mx, my + 0.004, 0), pbr("gy521", "#1d4fb3", 0, 0.45), P);
+  const gt = tex("gyT", 256, 196, (c, W, H) => {
+    c.fillStyle = "#1d4fb3"; c.fillRect(0, 0, W, H); c.fillStyle = "#fff"; c.font = "bold 22px system-ui"; c.fillText("GY-521", 12, 30);
+    c.font = "14px system-ui"; c.fillText("VCC GND SCL SDA XDA XCL AD0 INT", 6, H - 30); c.fillStyle = "#c8a34a";
+    for (let i = 0; i < 8; i++) { c.beginPath(); c.arc(20 + i * 31, H - 10, 7, 0, 7); c.fill(); }
+    c.strokeStyle = "#fff"; c.lineWidth = 3; c.beginPath(); c.moveTo(190, 70); c.lineTo(240, 70); c.moveTo(190, 70); c.lineTo(190, 20); c.stroke();
+    c.fillStyle = "#fff"; c.fillText("X", 238, 88); c.fillText("Y", 196, 22);
+    c.fillStyle = "#c8a34a"; [[18, 55], [238, 130]].forEach(([x, y]) => { c.beginPath(); c.arc(x, y, 10, 0, 7); c.fill(); });
+  });
+  texPlane("mpuFace", 0.021, 0.016, texMat("gyM", gt, 0.45), new V3(mx, my + 0.0049, 0), "+y", P);
+  box("mpuChip", 0.004, 0.0009, 0.004, new V3(mx - 0.001, my + 0.0055, -0.001), M.chip, P);
+  box("mpuConn", 0.02, 0.006, 0.004, new V3(mx, my + 0.007, 0.0065), M.black, P);
+  [[-0.008, -0.005], [0.008, -0.005]].forEach(([dx, dz]) => cyl("mpuScrew", 0.0015, 0.004, "y", new V3(mx + dx, my + 0.006, dz), M.steel, P));
+  tube("mpuCable", spline([new V3(mx, my + 0.008, 0.009), new V3(mx, my + 0.012, 0.035), new V3(0.50, 1.17, 0.09), new V3(0.44, 1.12, 0.22), new V3(0.27, 1.11, 0.36), new V3(0.23, 1.14, 0.38), new V3(0.23, 1.186, 0.38)], 16), 0.003, M.cableG, P);
+
+  // ---- cabo do SCT-013 até o ESP32 (jack P2)
+  tube("sctCable", spline([new V3(0.658, 1.0, 0.39), new V3(0.6, 0.99, 0.39), new V3(0.45, 1.06, 0.39), new V3(0.32, 1.13, 0.385), new V3(0.29, 1.16, 0.38), new V3(0.29, 1.186, 0.38)], 16), 0.0022, M.cableK, { label: "sct" });
+  // ---- cabo de força do motor (4 × 2,5 mm²)
+  tube("motorCable", spline([new V3(0.76, 0.915, 0.39), new V3(0.75, 0.87, 0.36), new V3(0.72, 0.86, 0.25), new V3(0.68, 0.95, 0.15), new V3(0.648, 1.12, 0.1), new V3(0.645, 1.162, 0.071)], 16), 0.0066, M.cableK, { label: "motor" });
+  tube("panelToJ", spline([new V3(0.82, 1.205, 0.39), new V3(0.826, 1.15, 0.39), new V3(0.82, 1.103, 0.39)]), 0.0066, M.cableK, { label: "quadro" });
+  tube("supply", spline([new V3(1.032, 1.55, 0.36), new V3(1.08, 1.52, 0.36), new V3(1.12, 1.2, 0.41), new V3(1.12, 0.5, 0.47), new V3(1.12, 0.03, 0.5), new V3(1.15, 0.012, 0.85), new V3(1.2, 0.012, 1.35), new V3(1.25, 0.04, 1.5), new V3(1.25, 0.37, 1.515)], 20), 0.008, M.cableK, { label: "quadro" });
+  cyl("qGlandR", 0.011, 0.02, "x", new V3(1.027, 1.55, 0.36), M.black, { label: "quadro" });
+  tube("espPower", spline([new V3(0.606, 1.35, 0.36), new V3(0.53, 1.31, 0.37), new V3(0.455, 1.35, 0.38)]), 0.003, M.cableG, { label: "esp32" });
+})();
+
+finalizeMeshes();
+
+/* ---------- pós-processamento ---------- */
+const pipeline = new BABYLON.DefaultRenderingPipeline("dp", true, scene, [camera]);
+pipeline.samples = 4; pipeline.fxaaEnabled = true;
+pipeline.imageProcessingEnabled = true;
+pipeline.imageProcessing.toneMappingEnabled = true;
+pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+pipeline.imageProcessing.exposure = 1.05; pipeline.imageProcessing.contrast = 1.15;
+pipeline.imageProcessing.vignetteEnabled = true; pipeline.imageProcessing.vignetteWeight = 1.4;
+const hl = new BABYLON.HighlightLayer("hl", scene, { blurHorizontalSize: 0.6, blurVerticalSize: 0.6 });
+
+/* =====================================================================
+   ETIQUETAS + PAINEL DE INFORMAÇÕES
+   ===================================================================== */
+const PINS = `<table><tr><td>MAX6675 SCK</td><td>GPIO18</td></tr><tr><td>MAX6675 CS</td><td>GPIO5</td></tr><tr><td>MAX6675 SO</td><td>GPIO19</td></tr>
+<tr><td>MPU-6050 SDA / SCL</td><td>GPIO21 / GPIO22 (0x68)</td></tr><tr><td>SCT-013 (condicionado)</td><td>GPIO34 · ADC1</td></tr><tr><td>Alimentação sensores</td><td>3,3 V · GND comum</td></tr></table>`;
+const LABELS = [
+  { id: "termopar", g: "sensor", ic: "T", c: "#e8590c", t: "Termopar tipo K", s: "Temperatura do óleo do mancal", a: [0.17, 1.18, -0.03], r: 0.45,
+    html: `<p>Sonda tipo K com bainha inox Ø3 mm, instalada por <b>conexão de compressão 1/4" NPT</b> no furo superior do suporte de mancal. A ponta fica <b>imersa no banho de óleo</b>, abaixo do nível indicado no visor (use “Corte do mancal” para ver).</p>
+      <p>Cabo de extensão tipo K (amarelo) até o MAX6675 na caixa de controle — emendas com cobre comum introduzem erro de junta.</p>` },
+  { id: "max6675", g: "sensor", ic: "M", c: "#e8590c", t: "MAX6675", s: "Conversor termopar → SPI", a: [0.182, 1.275, 0.405], r: 0.35,
+    html: `<p>Conversor para termopar K com <b>compensação de junta fria interna</b>, 12 bits, resolução 0,25 °C, faixa 0–1024 °C. Fica dentro da caixa para manter a junta fria em temperatura estável, longe do calor da bomba.</p>
+      <table><tr><td>Interface</td><td>SPI somente leitura</td></tr><tr><td>SCK / CS / SO</td><td>GPIO18 / GPIO5 / GPIO19</td></tr><tr><td>Conversão</td><td>≈ 220 ms (ler a ≤ 4 Hz)</td></tr></table>` },
+  { id: "sct", g: "sensor", ic: "I", c: "#1c7ed6", t: "SCT-013", s: "Corrente · somente fase L1", a: [0.775, 1.03, 0.37], r: 0.45,
+    html: `<p>TC de núcleo dividido (janela 13 mm) numa caixa de passagem com tampa transparente, onde o cabo do motor é aberto em condutores. Ele abraça <b>apenas a fase L1</b>: abraçar o cabo inteiro zeraria a leitura, pois em carga trifásica as correntes se cancelam.</p>
+      <table><tr><td>Modelo</td><td>SCT-013-000 (100 A : 50 mA)</td></tr><tr><td>Condicionamento</td><td>burden 33 Ω + polarização 1,65 V</td></tr><tr><td>Entrada</td><td>GPIO34 (ADC1, funciona com Wi-Fi)</td></tr><tr><td>Cálculo</td><td>Irms por amostragem ≈ 2 kHz em vários ciclos de 60 Hz</td></tr></table>
+      <p>Para ≈ 8 A, considere SCT-013-010/020 ou passe o condutor 2–3 voltas pela janela para ganhar resolução.</p>` },
+  { id: "mpu", g: "sensor", ic: "V", c: "#7048e8", t: "MPU-6050", s: "Vibração · na carcaça do motor", a: [0.51, 1.16, 0], r: 0.35,
+    html: `<p>Módulo GY-521 (acelerômetro + giroscópio MEMS) fixado <b>rigidamente na carcaça do motor</b>, junto ao mancal do lado acoplado, com parafusos M3 sobre base de alumínio colada com epóxi. Montagem rígida evita amortecer o sinal.</p>
+      <table><tr><td>Interface</td><td>I²C · SDA GPIO21 · SCL GPIO22 · 0x68</td></tr><tr><td>Faixa</td><td>±2 g (ajustável até ±16 g)</td></tr><tr><td>Amostragem</td><td>até 1 kHz (1X ≈ 58 Hz a 3500 rpm)</td></tr><tr><td>Eixos</td><td>X axial · Y/Z radiais</td></tr></table>
+      <p>Indicadores: aceleração RMS (g) e velocidade RMS estimada (mm/s), comparável à ISO 10816/20816.</p>` },
+  { id: "esp32", g: "sensor", ic: "µ", c: "#0ca678", t: "ESP32", s: "Caixa de controle · aquisição", a: [0.255, 1.31, 0.39], r: 0.55,
+    html: `<p>ESP32 DevKitC (WROOM-32) em caixa de policarbonato com tampa transparente e prensa-cabos. Fonte 5 V em trilho DIN alimentada pelo quadro. Lê os três sensores, calcula valores RMS e publica via Wi-Fi (MQTT/HTTP).</p>${PINS}
+      <p>Cabos: amarelo = termopar K · cinza = MPU-6050 (blindado, I²C a 100 kHz) · preto fino = SCT-013 (P2).</p>` },
+  { id: "bomba", g: "eq", c: "#1c4f94", t: "Bomba IMBIL INI 25-150", s: "Centrífuga · sucção axial", a: [XC, 1.2, 0], r: 1.0,
+    html: `<p>Bomba centrífuga monoestágio, <b>sucção axial DN40</b> e <b>recalque DN25 vertical no topo</b>, rotor nominal Ø150 mm, construção back pull-out e mancais de rolamento em <b>banho de óleo</b> com visor de nível.</p>
+      <p>Ponto de referência ilustrativo: 3500 rpm, ~6 m³/h a ~32 mca (confira a curva do catálogo IMBIL).</p>` },
+  { id: "motor", g: "eq", c: "#2d6b44", t: "Motor trifásico 3 cv · 2 polos", s: "Acoplamento elástico + protetor", a: [0.8, 1.15, 0], r: 1.0,
+    html: `<p>Motor de indução trifásico, 3 cv, 2 polos (≈3500 rpm), 220 V, IP55, carcaça 90L aletada com ventilação externa. Acoplamento elástico de garras sob protetor perfurado (NR-12). O pedestal na base alinha a altura de eixo com a bomba.</p>` },
+  { id: "base", g: "eq", c: "#2a2e33", t: "Base metálica", s: "Perfis U + pedestal do motor", a: [-0.3, 0.87, -0.2], r: 1.2,
+    html: `<p>Base em perfis U de aço soldados com chapa de apoio, pedestal para o motor e chumbadores à bancada. Mantém o alinhamento bomba–motor.</p>` },
+  { id: "reservatorio", g: "eq", c: "#3a8cc4", t: "Reservatório", s: "Acrílico · ~105 L", a: [-0.81, 1.33, -0.28], r: 1.2,
+    html: `<p>Tanque em acrílico com cantoneiras inox e régua de nível. O nível fica acima do eixo da bomba (<b>sucção afogada</b>), o que dá folga de NPSH e dispensa escorva.</p>` },
+  { id: "succao", g: "eq", c: "#6c757d", t: "Sucção DN40", s: "Válvula esfera + manovacuômetro", a: [-0.45, 1.05, -0.03], r: 0.9,
+    html: `<p>Tubo galvanizado DN40 com trecho reto antes do flange, válvula esfera (totalmente aberta em operação), união e manovacuômetro.</p>` },
+  { id: "recalque", g: "eq", c: "#6c757d", t: "Recalque DN25", s: "Manômetro + válvula globo", a: [-0.45, 1.64, 0.05], r: 1.1,
+    html: `<p>Linha DN25 com manômetro, válvula globo para ajustar a vazão (ponto de operação) e retorno submerso ao reservatório — circuito fechado.</p>` },
+  { id: "quadro", g: "eq", c: "#495057", t: "Quadro de comando", s: "Liga/desliga · emergência", a: [0.82, 1.66, 0.28], r: 1.0,
+    html: `<p>Disjuntor-motor, contator, botoeiras liga/desliga, sinaleiro e botão de emergência. Alimentado por tomada industrial 3P+T. Também alimenta a fonte 5 V da caixa do ESP32.</p>` },
+];
+const labelsEl = document.getElementById("labels"), svg = document.getElementById("leaders");
+LABELS.forEach(L => {
+  L.pos = new V3(...L.a);
+  const el = document.createElement("div"); el.className = "lbl " + L.g; el.style.setProperty("--c", L.c);
+  el.innerHTML = (L.g === "sensor" ? `<span class="ic">${L.ic}</span>` : "") + `<div><div class="t">${L.t}</div><div class="s">${L.s}</div></div>`;
+  el.onclick = () => openInfo(L); labelsEl.appendChild(el); L.el = el;
+  L.line = document.createElementNS("http://www.w3.org/2000/svg", "line"); L.line.setAttribute("stroke", L.c); L.line.setAttribute("stroke-width", "1.6");
+  L.dot = document.createElementNS("http://www.w3.org/2000/svg", "circle"); L.dot.setAttribute("r", "3.5"); L.dot.setAttribute("fill", L.c); L.dot.setAttribute("stroke", "#fff"); L.dot.setAttribute("stroke-width", "1.5");
+  svg.appendChild(L.line); svg.appendChild(L.dot);
+});
+let labelMode = 0; // 0 todos, 1 sensores, 2 nenhum
+function updateLabels() {
+  const rw = engine.getRenderWidth(), rh = engine.getRenderHeight(), W = canvas.clientWidth, H = canvas.clientHeight, k = W / rw;
+  const vp = camera.viewport.toGlobal(rw, rh), tm = scene.getTransformMatrix(), I = BABYLON.Matrix.Identity();
+  const vis = [];
+  LABELS.forEach(L => {
+    const show = labelMode === 0 || (labelMode === 1 && L.g === "sensor");
+    const p = BABYLON.Vector3.Project(L.pos, I, tm, vp);
+    const ok = show && p.z > 0 && p.z < 1 && p.x > -50 && p.x < rw + 50 && p.y > -50 && p.y < rh + 50;
+    L.el.style.display = ok ? "" : "none"; L.line.style.display = L.dot.style.display = ok ? "" : "none";
+    if (!ok) return;
+    L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; L.px = p.x * k; L.py = p.y * k;
+    const side = L.px > W * 0.5 ? 1 : -1;
+    L.x = side > 0 ? L.px + 30 : L.px - 30 - L.w; L.y = L.py - (L.g === "sensor" ? 62 : 48) - L.h / 2;
+    L.x = Math.max(8, Math.min(W - L.w - 8, L.x)); L.y = Math.max(8, Math.min(H - L.h - 8, L.y)); vis.push(L);
+  });
+  vis.sort((a, b) => a.y - b.y);
+  for (let pass = 0; pass < 3; pass++) for (let i = 0; i < vis.length; i++) for (let j = 0; j < i; j++) {
+    const a = vis[j], b = vis[i];
+    if (b.x < a.x + a.w + 4 && b.x + b.w + 4 > a.x && b.y < a.y + a.h + 4 && b.y + b.h + 4 > a.y) b.y = a.y + a.h + 4;
+  }
+  vis.forEach(L => {
+    L.el.style.transform = `translate(${L.x}px,${L.y}px)`;
+    const ex = L.px < L.x ? L.x : (L.px > L.x + L.w ? L.x + L.w : L.px), ey = L.y + L.h / 2;
+    L.line.setAttribute("x1", L.px); L.line.setAttribute("y1", L.py); L.line.setAttribute("x2", ex); L.line.setAttribute("y2", ey);
+    L.dot.setAttribute("cx", L.px); L.dot.setAttribute("cy", L.py);
+  });
+}
+
+let current = null, fly = null;
+function openInfo(L) {
+  current = L;
+  document.getElementById("infoBody").innerHTML = `<h2>${L.t}</h2><span class="tag" style="--c:${L.c}">${L.g === "sensor" ? "Instrumentação" : "Equipamento"}</span>${L.html}`;
+  const info = document.getElementById("info"); info.classList.remove("hidden"); info.style.setProperty("--c", L.c);
+  hl.removeAllMeshes();
+  scene.meshes.forEach(m => { if (m.metadata && m.metadata.label === L.id && m.isVisible && !(m.material && m.material.metadata && m.material.metadata.transparent)) hl.addMesh(m, C3.FromHexString(L.c)); });
+}
+document.getElementById("infoClose").onclick = () => { document.getElementById("info").classList.add("hidden"); hl.removeAllMeshes(); current = null; };
+document.getElementById("infoFocus").onclick = () => current && flyTo(current.pos, current.r);
+function flyTo(target, radius, alpha, beta) { fly = { target: target.clone(), radius, alpha: alpha !== undefined ? alpha : camera.alpha, beta: beta !== undefined ? beta : Math.min(camera.beta, 1.25) }; }
+canvas.addEventListener("pointerdown", () => { fly = null; });
+canvas.addEventListener("wheel", () => { fly = null; }, { passive: true });
+scene.onPointerObservable.add(pi => {
+  if (pi.type !== BABYLON.PointerEventTypes.POINTERTAP) return;
+  const pk = scene.pick(scene.pointerX, scene.pointerY, m => m.isPickable && m.metadata && m.metadata.label);
+  if (pk && pk.hit) { const L = LABELS.find(l => l.id === pk.pickedMesh.metadata.label); if (L) openInfo(L); }
+});
+
+/* =====================================================================
+   SIMULAÇÃO (ESP32 publicando a 5 Hz)
+   ===================================================================== */
+const sim = { on: false, rpm: 0, tStart: 0, T: 26, I: 0, v: 0.02, a: 0.001, spin: 0, acc: 0, t: 0 };
+const hist = { T: [], I: [], V: [] };
+function rnd() { return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+function sample() {
+  const ld = sim.rpm / 3500, ts = sim.t - sim.tStart;
+  sim.I = sim.on ? Math.max(0, 6.8 * (0.55 + 0.45 * ld) + (ts < 1.2 ? 38 * Math.exp(-ts / 0.25) : 0) + rnd() * 0.06) : 0;
+  const bump = 1.4 * Math.exp(-Math.pow((ld - 0.45) / 0.08, 2));
+  sim.v = Math.max(0.01, 0.02 + 1.25 * ld * ld + bump * (ld > 0.05 ? 1 : 0) + rnd() * 0.05 * (0.2 + ld));
+  sim.a = sim.v * 1e-3 * 2 * Math.PI * 58.3 / 9.81 + Math.abs(rnd()) * 0.003;
+  const Tq = Math.round(sim.T * 4) / 4;   // resolução do MAX6675
+  push("T", Tq); push("I", sim.I); push("V", sim.v);
+  setTxt("vT", Tq.toFixed(2)); setTxt("vI", sim.I.toFixed(2)); setTxt("vV", sim.v.toFixed(2)); setTxt("vA", sim.a.toFixed(3));
+  spark("sT", hist.T, "#e8590c", 20, 60); spark("sI", hist.I, "#1c7ed6", 0, 10); spark("sV", hist.V, "#7048e8", 0, 3);
+  document.getElementById("led").classList.add("on"); espLed.material = M.ledM; M.ledM.emissiveColor = new C3(0.1, 1, 0.6);
+  setTimeout(() => { document.getElementById("led").classList.remove("on"); M.ledM.emissiveColor = C3.Black(); }, 70);
+}
+function push(k, v) { hist[k].push(v); if (hist[k].length > 120) hist[k].shift(); }
+function setTxt(id, s) { document.getElementById(id).textContent = s.replace(".", ","); }
+function spark(id, arr, col, lo, hi) {
+  const c = document.getElementById(id), x = c.getContext("2d"), W = c.width, H = c.height; x.clearRect(0, 0, W, H);
+  x.strokeStyle = "rgba(0,0,0,.08)"; x.beginPath(); x.moveTo(0, H - 1); x.lineTo(W, H - 1); x.stroke();
+  if (arr.length < 2) return; x.strokeStyle = col; x.lineWidth = 2.5; x.beginPath();
+  arr.forEach((v, i) => { const px = i / 119 * W, py = H - 4 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * (H - 8); i ? x.lineTo(px, py) : x.moveTo(px, py); }); x.stroke();
+}
+function setMotor(on) {
+  sim.on = on; if (on) sim.tStart = sim.t;
+  const b = document.getElementById("btnMotor"); b.textContent = on ? "■ Desligar motor" : "▶ Ligar motor"; b.classList.toggle("on", on);
+  M.lampOn.emissiveColor = on ? new C3(0.25, 1.4, 0.3) : new C3(0.02, 0.12, 0.03);
+}
+document.getElementById("btnMotor").onclick = () => setMotor(!sim.on);
+let cut = false;
+document.getElementById("btnCut").onclick = e => {
+  cut = !cut; e.target.classList.toggle("on", cut);
+  const sm = cutaway.shells[0].material; sm.alpha = cut ? 0.22 : 1;
+  sm.transparencyMode = cut ? BABYLON.PBRMaterial.PBRMATERIAL_ALPHABLEND : BABYLON.PBRMaterial.PBRMATERIAL_OPAQUE;
+  cutaway.inner.forEach(m => m.isVisible = cut);
+  if (cut) flyTo(new V3(0.12, 1.06, 0), 0.55, -Math.PI / 2 - 0.35, 1.2);
+};
+document.getElementById("btnLabels").onclick = e => { labelMode = (labelMode + 1) % 3; e.target.textContent = "Rótulos: " + ["todos", "sensores", "ocultos"][labelMode]; };
+document.getElementById("btnRot").onclick = e => { camera.useAutoRotationBehavior = !camera.useAutoRotationBehavior; if (camera.autoRotationBehavior) camera.autoRotationBehavior.idleRotationSpeed = 0.15; e.target.classList.toggle("on", camera.useAutoRotationBehavior); };
+document.getElementById("btnView").onclick = () => flyTo(HOME.target, HOME.radius, HOME.alpha, HOME.beta);
+
+/* ---------- loop ---------- */
+scene.onBeforeRenderObservable.add(() => {
+  const dt = Math.min(0.05, engine.getDeltaTime() / 1000); sim.t += dt;
+  sim.rpm += ((sim.on ? 3500 : 0) - sim.rpm) * Math.min(1, dt * (sim.on ? 1.8 : 0.6));
+  const ld = sim.rpm / 3500;
+  sim.T += ((26 + 27 * ld) - sim.T) * dt / 45;
+  sim.spin += ld * dt * 9; rotor.rotation.x = sim.spin;
+  gaugeD.set(3.0 * ld * ld + Math.sin(sim.t * 40) * 0.02 * ld); gaugeS.set(0.017 - 0.07 * ld * ld);
+  sim.acc += dt; if (sim.acc >= 0.2) { sim.acc = 0; sample(); }
+  if (fly) {
+    const f = Math.min(1, dt * 4);
+    camera.target = V3.Lerp(camera.target, fly.target, f);
+    camera.radius += (fly.radius - camera.radius) * f;
+    let da = fly.alpha - camera.alpha; da = Math.atan2(Math.sin(da), Math.cos(da)); camera.alpha += da * f;
+    camera.beta += (fly.beta - camera.beta) * f;
+    if (V3.Distance(camera.target, fly.target) < 0.002 && Math.abs(fly.radius - camera.radius) < 0.003) fly = null;
+  }
+});
+scene.onAfterRenderObservable.add(updateLabels);
+scene.executeWhenReady(() => document.getElementById("loading").style.display = "none");
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
+</script>
+</body>
+</html>
